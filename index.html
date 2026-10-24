@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Temple Adventure Run</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #101b17;
+    color: white;
+    font-family: Arial, sans-serif;
+    text-align: center;
+}
+
+h1 {
+    color: #ffd166;
+    margin: 14px 0 5px;
+}
+
+p {
+    margin: 8px;
+}
+
+.game-container {
+    width: 100%;
+    max-width: 500px;
+    margin: auto;
+    padding: 10px;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #264b35;
+    border: 3px solid #d4a056;
+    border-radius: 12px;
+    touch-action: none;
+}
+
+.stats {
+    display: flex;
+    justify-content: space-around;
+    margin: 12px 0;
+    color: #ffd166;
+    font-weight: bold;
+}
+
+button {
+    padding: 12px 20px;
+    margin: 5px;
+    border: none;
+    border-radius: 8px;
+    background: #ffd166;
+    color: #302313;
+    font-weight: bold;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.controls {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.controls button {
+    width: 65px;
+    font-size: 23px;
+}
+
+#message {
+    color: #ffd166;
+    min-height: 24px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="game-container">
+    <h1>🏛️ TEMPLE ADVENTURE</h1>
+    <p>Run, collect coins and escape the obstacles!</p>
+
+    <div class="stats">
+        <span>Score: <span id="score">0</span></span>
+        <span>Coins: <span id="coins">0</span></span>
+        <span>Speed: <span id="speed">1</span></span>
+    </div>
+
+    <canvas id="game" width="420" height="620"></canvas>
+
+    <p id="message">Press Start Game to begin!</p>
+
+    <button id="startBtn">Start Game</button>
+    <button id="restartBtn">Restart</button>
+
+    <div class="controls">
+        <button data-move="left">⬅️</button>
+        <button data-move="jump">⬆️</button>
+        <button data-move="right">➡️</button>
+        <button data-move="slide">⬇️</button>
+    </div>
+
+    <p>Keyboard: ← → move | ↑ jump | ↓ slide</p>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+const W = canvas.width;
+const H = canvas.height;
+
+const scoreText = document.getElementById("score");
+const coinsText = document.getElementById("coins");
+const speedText = document.getElementById("speed");
+const message = document.getElementById("message");
+
+let running = false;
+let gameOver = false;
+let animationId = null;
+let lastTime = 0;
+
+let score = 0;
+let coins = 0;
+let speed = 4;
+let spawnTimer = 0;
+let objects = [];
+let particles = [];
+
+const lanes = [105, 210, 315];
+
+const player = {
+    lane: 1,
+    x: lanes[1],
+    y: 500,
+    jumpHeight: 0,
+    jumpVelocity: 0,
+    sliding: 0
+};
+
+function resetGame() {
+    if (animationId !== null) {
+        cancelAnimationFrame(animationId);
+    }
+
+    running = false;
+    gameOver = false;
+    lastTime = 0;
+
+    score = 0;
+    coins = 0;
+    speed = 4;
+    spawnTimer = 0;
+
+    objects = [];
+    particles = [];
+
+    player.lane = 1;
+    player.x = lanes[1];
+    player.jumpHeight = 0;
+    player.jumpVelocity = 0;
+    player.sliding = 0;
+
+    updateStats();
+    message.textContent = "Press Start Game to begin!";
+
+    draw();
+}
+
+function startGame() {
+    if (running) return;
+
+    if (gameOver) resetGame();
+
+    running = true;
+    gameOver = false;
+
+    message.textContent = "Avoid obstacles and collect coins!";
+    lastTime = 0;
+
+    animationId = requestAnimationFrame(loop);
+}
+
+function updateStats() {
+    scoreText.textContent = Math.floor(score);
+    coinsText.textContent = coins;
+    speedText.textContent = (speed / 4).toFixed(1) + "x";
+}
+
+function move(action) {
+    if (!running) return;
+
+    if (action === "left") {
+        player.lane = Math.max(0, player.lane - 1);
+    }
+
+    if (action === "right") {
+        player.lane = Math.min(2, player.lane + 1);
+    }
+
+    if (action === "jump" && player.jumpHeight === 0) {
+        player.jumpVelocity = 13;
+    }
+
+    if (action === "slide" && player.sliding <= 0) {
+        player.sliding = 35;
+    }
+}
+
+document.addEventListener("keydown", event => {
+    const actions = {
+        ArrowLeft: "left",
+        ArrowRight: "right",
+        ArrowUp: "jump",
+        ArrowDown: "slide"
+    };
+
+    if (actions[event.key]) {
+        event.preventDefault();
+        move(actions[event.key]);
+    }
+
+    if (event.code === "Space" && !running) {
+        event.preventDefault();
+        startGame();
+    }
+});
+
+document.querySelectorAll("[data-move]").forEach(button => {
+    button.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        move(button.dataset.move);
+    });
+});
+
+// Swipe controls for mobile
+let touchStartX = 0;
+let touchStartY = 0;
+
+canvas.addEventListener("touchstart", event => {
+    const touch = event.changedTouches[0];
+
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+}, { passive: true });
+
+canvas.addEventListener("touchend", event => {
+    const touch = event.changedTouches[0];
+
+    const dx = touch.clientX - touchStartX;
+    const dy = touch.clientY - touchStartY;
+
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 25) return;
+
+    if (Math.abs(dx) > Math.abs(dy)) {
+        move(dx < 0 ? "left" : "right");
+    } else {
+        move(dy < 0 ? "jump" : "slide");
+    }
+}, { passive: true });
+
+function spawnObjects() {
+    const lane = Math.floor(Math.random() * 3);
+    const choice = Math.random();
+
+    if (choice < 0.35) {
+        objects.push({
+            type: "coin",
+            lane,
+            y: -20,
+            collected: false
+        });
+    } else {
+        objects.push({
+            type: choice < 0.70 ? "rock" : "arch",
+            lane,
+            y: -40,
+            passed: false
+        });
+    }
+
+    // Sometimes create a line of coins
+    if (Math.random() < 0.35) {
+        const coinLane = Math.floor(Math.random() * 3);
+
+        for (let i = 0; i < 3; i++) {
+            objects.push({
+                type: "coin",
+                lane: coinLane,
+                y: -100 - i * 35,
+                collected: false
+            });
+        }
+    }
+}
+
+function update(delta) {
+    const dt = Math.min(delta / 16.67, 2);
+
+    score += 0.12 * speed * dt;
+    speed = Math.min(10, 4 + score / 250);
+
+    player.x += (lanes[player.lane] - player.x) * 0.22 * dt;
+
+    if (player.jumpVelocity !== 0 || player.jumpHeight > 0) {
+        player.jumpHeight += player.jumpVelocity * dt;
+        player.jumpVelocity -= 0.65 * dt;
+
+        if (player.jumpHeight <= 0) {
+            player.jumpHeight = 0;
+            player.jumpVelocity = 0;
+        }
+    }
+
+    if (player.sliding > 0) {
+        player.sliding -= dt;
+    }
+
+    spawnTimer += dt;
+
+    if (spawnTimer > Math.max(24, 60 - speed * 3)) {
+        spawnObjects();
+        spawnTimer = 0;
+    }
+
+    for (const obj of objects) {
+        obj.y += speed * dt;
+
+        const sameLane = obj.lane === player.lane;
+        const closeToPlayer = obj.y > 455 && obj.y < 535;
+
+        if (sameLane && closeToPlayer) {
+            if (obj.type === "coin" && !obj.collected) {
+                obj.collected = true;
+                coins++;
+                score += 10;
+            }
+
+            if (
+                obj.type === "rock" &&
+                !obj.passed &&
+                player.jumpHeight < 25
+            ) {
+                endGame();
+                return;
+            }
+
+            if (
+                obj.type === "arch" &&
+                !obj.passed &&
+                player.sliding <= 0
+            ) {
+                endGame();
+                return;
+            }
+        }
+
+        if (obj.y > 550) {
+            obj.passed = true;
+        }
+    }
+
+    objects = objects.filter(obj =>
+        obj.y < H + 50 &&
+        !(obj.type === "coin" && obj.collected)
+    );
+
+    updateStats();
+}
+
+function drawBackground() {
+    // Jungle background
+    const gradient = ctx.createLinearGradient(0, 0, 0, H);
+    gradient.addColorStop(0, "#183c2c");
+    gradient.addColorStop(1, "#5b4327");
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+
+    // Jungle trees
+    for (let i = 0; i < 8; i++) {
+        const x = i * 65 - 10;
+
+        ctx.fillStyle = "#102c20";
+        ctx.fillRect(x, 0, 18, H);
+
+        ctx.fillStyle = "#285338";
+
+        ctx.beginPath();
+        ctx.arc(x + 8, 70 + (i % 3) * 35, 40, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Perspective path
+    ctx.fillStyle = "#ad8754";
+
+    ctx.beginPath();
+    ctx.moveTo(140, 0);
+    ctx.lineTo(280, 0);
+    ctx.lineTo(405, H);
+    ctx.lineTo(15, H);
+    ctx.closePath();
+    ctx.fill();
+
+    // Stone road lines
+    ctx.strokeStyle = "#e1bd83";
+    ctx.lineWidth = 3;
+
+    for (let i = 1; i <= 2; i++) {
+        const topX = 140 + i * 46;
+        const bottomX = 15 + i * 130;
+
+        ctx.beginPath();
+        ctx.moveTo(topX, 0);
+        ctx.lineTo(bottomX, H);
+        ctx.stroke();
+    }
+
+    // Temple silhouette
+    ctx.fillStyle = "#654526";
+
+    ctx.fillRect(160, 15, 100, 48);
+
+    ctx.beginPath();
+    ctx.moveTo(150, 15);
+    ctx.lineTo(210, -15);
+    ctx.lineTo(270, 15);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = "#d5b16c";
+    ctx.fillRect(190, 30, 40, 33);
+}
+
+function drawPlayer() {
+    const x = player.x;
+    const y = player.y - player.jumpHeight;
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    if (player.sliding > 0) {
+        // Sliding character
+        ctx.fillStyle = "#42c7ff";
+        ctx.fillRect(-25, -10, 50, 22);
+
+        ctx.fillStyle = "#ffd1a3";
+        ctx.beginPath();
+        ctx.arc(25, -5, 11, 0, Math.PI * 2);
+        ctx.fill();
+    } else {
+        // Legs
+        ctx.strokeStyle = "#25252b";
+        ctx.lineWidth = 9;
+
+        ctx.beginPath();
+        ctx.moveTo(-7, 18);
+        ctx.lineTo(-12, 38);
+
+        ctx.moveTo(7, 18);
+        ctx.lineTo(12, 38);
+        ctx.stroke();
+
+        // Body
+        ctx.fillStyle = "#42c7ff";
+        ctx.fillRect(-15, -5, 30, 30);
+
+        // Head
+        ctx.fillStyle = "#ffd1a3";
+
+        ctx.beginPath();
+        ctx.arc(0, -17, 14, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Hair
+        ctx.fillStyle = "#3b2417";
+
+        ctx.beginPath();
+        ctx.arc(0, -22, 14, Math.PI, Math.PI * 2);
+        ctx.fill();
+
+        // Arms
+        ctx.strokeStyle = "#ffd1a3";
+        ctx.lineWidth = 7;
+
+        ctx.beginPath();
+        ctx.moveTo(-13, 0);
+        ctx.lineTo(-25, 13);
+
+        ctx.moveTo(13, 0);
+        ctx.lineTo(25, 13);
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+function drawObjects() {
+    objects.forEach(obj => {
+        const x = lanes[obj.lane];
+        const y = obj.y;
+
+        if (obj.type === "coin" && !obj.collected) {
+            ctx.fillStyle = "#ffd700";
+            ctx.strokeStyle = "#fff0a0";
+            ctx.lineWidth = 3;
+
+            ctx.beginPath();
+            ctx.arc(x, y, 12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = "#9c6900";
+            ctx.font = "bold 13px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText("$", x, y + 5);
+        }
+
+        if (obj.type === "rock") {
+            ctx.fillStyle = "#6c7078";
+
+            ctx.beginPath();
+            ctx.moveTo(x - 25, y + 20);
+            ctx.lineTo(x - 20, y - 10);
+            ctx.lineTo(x + 5, y - 22);
+            ctx.lineTo(x + 25, y - 5);
+            ctx.lineTo(x + 25, y + 20);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.strokeStyle = "#aeb3ba";
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+
+        if (obj.type === "arch") {
+            ctx.strokeStyle = "#e2c28c";
+            ctx.lineWidth = 12;
+
+            ctx.beginPath();
+            ctx.moveTo(x - 28, y + 20);
+            ctx.lineTo(x - 28, y - 25);
+            ctx.lineTo(x + 28, y - 25);
+            ctx.lineTo(x + 28, y + 20);
+            ctx.stroke();
+
+            ctx.fillStyle = "#76522e";
+            ctx.fillRect(x - 18, y - 22, 36, 22);
+        }
+    });
+}
+
+function draw() {
+    drawBackground();
+    drawObjects();
+    drawPlayer();
+}
+
+function loop(timestamp) {
+    if (!running) return;
+
+    const delta = lastTime
+        ? Math.min(timestamp - lastTime, 40)
+        : 16.67;
+
+    lastTime = timestamp;
+
+    update(delta);
+    draw();
+
+    if (running) {
+        animationId = requestAnimationFrame(loop);
+    }
+}
+
+function endGame() {
+    running = false;
+    gameOver = true;
+
+    message.textContent =
+        "Game Over! Final Score: " + Math.floor(score) +
+        " | Coins: " + coins;
+
+    document.getElementById("startBtn").textContent = "Play Again";
+}
+
+document.getElementById("startBtn").addEventListener(
+    "click",
+    startGame
+);
+
+document.getElementById("restartBtn").addEventListener(
+    "click",
+    resetGame
+);
+
+resetGame();
+</script>
+
+</body>
+</html>
